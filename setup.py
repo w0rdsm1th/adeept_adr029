@@ -5,9 +5,14 @@
 
 import os
 import time
+import getpass
 
 curpath = os.path.realpath(__file__)
 thisPath = "/" + os.path.dirname(curpath)
+
+# Get current user dynamically
+current_user = getpass.getuser()
+user_home = os.path.expanduser("~")
 
 def replace_num(file,initial,new_num):
     newline=""
@@ -57,7 +62,7 @@ commands_2 = [
     "sudo apt-get -y install libqtgui4 libhdf5-dev libhdf5-serial-dev libatlas-base-dev libjasper-dev libqt4-test",
     "sudo git clone https://github.com/oblique/create_ap",
     "cd " + thisPath + "/create_ap && sudo make install",
-    "cd //home/pi/create_ap && sudo make install",
+    f"cd {user_home}/create_ap && sudo make install",
     "sudo apt-get install -y util-linux procps hostapd iproute2 iw haveged dnsmasq"
 ]
 
@@ -75,21 +80,22 @@ try:
 except:
     print('Error updating boot config to enable i2c. Please try again.')
 
-try:
-    os.system('sudo touch //home/pi/startup.sh')
-    with open("//home/pi/startup.sh",'w') as file_to_write:
-        #you can choose how to control the robot
-        file_to_write.write("#!/bin/sh\nsudo python3 " + thisPath + "/server/webServer.py")
-#       file_to_write.write("#!/bin/sh\nsudo python3 " + thisPath + "/server/server.py")
-except:
-    pass
 
-os.system('sudo chmod 777 //home/pi/startup.sh')
+startup_script_path = os.path.join(user_home, "startup.sh")
+os.system(f'sudo touch {startup_script_path}')
+with open(startup_script_path,'w') as file_to_write:
+    #you can choose how to control the robot
+    file_to_write.write("#!/bin/sh\nsudo python3 " + thisPath + "/server/webServer.py")
+#   file_to_write.write("#!/bin/sh\nsudo python3 " + thisPath + "/server/server.py")
 
-replace_num('/etc/rc.local','fi','fi\n//home/pi/startup.sh start')
+
+startup_script_path = os.path.join(user_home, "startup.sh")
+os.system(f'sudo chmod 777 {startup_script_path}')
+
+replace_num('/etc/rc.local','fi',f'fi\n{startup_script_path} start')
 
 # try:
-#     os.system("sudo cp -f //home/pi/adeept_adr029/server/config.txt //etc/config.txt")
+#     os.system(f"sudo cp -f {user_home}/adeept_adr029/server/config.txt //etc/config.txt")
 # except:
 #     os.system("sudo cp -f "+ thisPath  +"/adeept_rasptank/server/config.txt //etc/config.txt")
 print('The program in Raspberry Pi has been installed, disconnected and restarted. \nYou can now power off the Raspberry Pi to install the camera and driver board (Robot HAT). \nAfter turning on again, the Raspberry Pi will automatically run the program to set the servos port signal to turn the servos to the middle position, which is convenient for mechanical assembly.')
