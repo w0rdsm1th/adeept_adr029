@@ -9,8 +9,8 @@ import getpass
 import signal
 import sys
 
-curpath = os.path.realpath(__file__)
-thisPath = "/" + os.path.dirname(curpath)
+cur_path = os.path.realpath(__file__)
+this_path = os.path.dirname(cur_path)
 
 # Get current user dynamically
 current_user = getpass.getuser()
@@ -78,7 +78,7 @@ Wants=network.target
 Type=simple
 User={current_user}
 Group={current_user}
-WorkingDirectory={thisPath}
+WorkingDirectory={this_path}
 ExecStart={startup_script_path}
 Restart=always
 RestartSec=5
@@ -186,7 +186,7 @@ commands_2 = [
     f"{pip_cmd} RPi.GPIO",
     "sudo apt-get -y install libqtgui4 libhdf5-dev libhdf5-serial-dev libatlas-base-dev libjasper-dev libqt4-test",
     "sudo git clone https://github.com/oblique/create_ap",
-    "cd " + thisPath + "/create_ap && sudo make install",
+    "cd " + this_path + "/create_ap && sudo make install",
     f"cd {user_home}/create_ap && sudo make install",
     "sudo apt-get install -y util-linux procps hostapd iproute2 iw haveged dnsmasq"
 ]
@@ -266,9 +266,9 @@ try:
         if use_uv:
             # Use the virtual environment in the startup script
             file_to_write.write(
-                f"#!/bin/bash\nsource {venv_path}/bin/activate\npython3 " + thisPath + "/server/webServer.py\n")
+                f"#!/bin/bash\nsource {venv_path}/bin/activate\npython3 " + this_path + "/server/webServer.py\n")
         else:
-            file_to_write.write("#!/bin/bash\npython3 " + thisPath + "/server/webServer.py\n")
+            file_to_write.write("#!/bin/bash\npython3 " + this_path + "/server/webServer.py\n")
     #       file_to_write.write("#!/bin/bash\npython3 " + thisPath + "/server/server.py\n")
 
     # Make startup script executable
