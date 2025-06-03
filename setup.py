@@ -63,7 +63,6 @@ def check_uv_available():
     return os.system("which uv > /dev/null 2>&1") == 0
 
 
-# Create systemd service instead of using rc.local
 def create_systemd_service(startup_script_path):
     """Create a systemd service for auto-starting the robot server"""
     service_name = "robot-server.service"
@@ -89,11 +88,13 @@ WantedBy=multi-user.target
 """
 
     try:
-        # Write the service file
-        with open(service_path, 'w') as f:
+        # Write to temp file first
+        temp_path = f"/tmp/{service_name}"
+        with open(temp_path, 'w') as f:
             f.write(service_content)
 
-        # Set proper permissions
+        # Move with sudo
+        os.system(f"sudo mv {temp_path} {service_path}")
         os.system(f"sudo chmod 644 {service_path}")
 
         # Reload systemd and enable the service
@@ -258,17 +259,17 @@ try:
 except:
     print('Error updating boot config to enable i2c. Please try again.')
 
+# And fix the startup script creation:
 try:
-    startup_script_path = os.path.join(user_home, "startup.sh")
-    os.system(f'touch {startup_script_path}')
+    startup_script_path = os.path.join(user_home, "startup.sh")  # This should create it in /home/aleks/
     with open(startup_script_path, 'w') as file_to_write:
-        # you can choose how to control the robot
         if use_uv:
             # Use the virtual environment in the startup script
             file_to_write.write(
-                f"#!/bin/bash\nsource {venv_path}/bin/activate\npython3 " + this_path + "/server/webServer.py\n")
+                f"#!/bin/bash\nsource {venv_path}/bin/activate\npython3 {this_path}/server/webServer.py\n"
+            )
         else:
-            file_to_write.write("#!/bin/bash\npython3 " + this_path + "/server/webServer.py\n")
+            file_to_write.write(f"#!/bin/bash\npython3 {thisPath}/server/webServer.py\n")
     #       file_to_write.write("#!/bin/bash\npython3 " + thisPath + "/server/server.py\n")
 
     # Make startup script executable
