@@ -36,16 +36,62 @@ def check_uv_available():
     return os.system("which uv > /dev/null 2>&1") == 0
 
 
-def replace_num(file, initial, new_num):
-    newline = ""
-    str_num = str(new_num)
-    with open(file, "r") as f:
-        for line in f.readlines():
-            if (line.find(initial) == 0):
-                line = (str_num + '\n')
-            newline += line
-    with open(file, "w") as f:
-        f.writelines(newline)
+# Create systemd service instead of using rc.local
+def create_systemd_service(startup_script_path):
+    """Create a systemd service for auto-starting the robot server"""
+    service_name = "robot-server.service"
+    service_path = f"/etc/systemd/system/{service_name}"
+
+    service_content = f"""[Unit]
+Description=Robot Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User={current_user}
+Group={current_user}
+WorkingDirectory={thisPath}
+ExecStart={startup_script_path}
+Restart=always
+RestartSec=5
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    try:
+        # Write the service file
+        with open(service_path, 'w') as f:
+            f.write(service_content)
+
+        # Set proper permissions
+        os.system(f"sudo chmod 644 {service_path}")
+
+        # Reload systemd and enable the service
+        os.system("sudo systemctl daemon-reload")
+        os.system(f"sudo systemctl enable {service_name}")
+
+        print(f"Created systemd service: {service_name}")
+        return True
+
+    except Exception as e:
+        print(f"Error creating systemd service: {e}")
+        return False
+
+
+def create_cron_alternative(startup_script_path):
+    """Alternative: Add to user's crontab for @reboot"""
+    try:
+        # Add to user's crontab
+        cron_line = f"@reboot {startup_script_path}"
+        os.system(f'(crontab -l 2>/dev/null; echo "{cron_line}") | crontab -')
+        print("Added startup script to crontab")
+        return True
+    except Exception as e:
+        print(f"Error adding to crontab: {e}")
+        return False
 
 
 # Install uv first
@@ -118,30 +164,83 @@ for x in range(3):
     if mark_2 == 0:
         break
 
+
+def replace_num(file, initial, new_num):
+    newline = ""
+    str_num = str(new_num)
+    try:
+        with open(file, "r") as f:
+            for line in f.readlines():
+                if (line.find(initial) == 0):
+                    line = (str_num + '\n')
+                newline += line
+        with open(file, "w") as f:
+            f.writelines(newline)
+    except FileNotFoundError:
+        print(f"Warning: {file} not found, skipping configuration")
+    except Exception as e:
+        print(f"Error modifying {file}: {e}")
+
+
+def update_boot_config():
+    """Intelligently update boot config in the correct location"""
+    old_config = "/boot/config.txt"
+    new_config = "/boot/firmware/config.txt"
+
+    try:
+        # Check if old config exists and what it contains
+        if os.path.exists(old_config):
+            with open(old_config, 'r') as f:
+                content = f.read()
+
+            # If it contains the redirect warning, use new location
+            if "DO NOT EDIT" in content.upper() or "moved to" in content:
+                print("Old config is a redirect, using new location")
+                replace_num(new_config, '#dtparam=i2c_arm=on', 'dtparam=i2c_arm=on\nstart_x=1\n')
+            else:
+                # Old config is the real one, use it
+                print("Using old config location")
+                replace_num(old_config, '#dtparam=i2c_arm=on', 'dtparam=i2c_arm=on\nstart_x=1\n')
+        else:
+            # Old config doesn't exist, must be new system
+            print("Old config not found, using new location")
+            replace_num(new_config, '#dtparam=i2c_arm=on', 'dtparam=i2c_arm=on\nstart_x=1\n')
+
+        print('Updated boot config to enable i2c and camera')
+
+    except Exception as e:
+        print(f'Error updating boot config: {e}')
+
+
 try:
-    replace_num("/boot/config.txt", '#dtparam=i2c_arm=on', 'dtparam=i2c_arm=on\nstart_x=1\n')
+    update_boot_config()
 except:
     print('Error updating boot config to enable i2c. Please try again.')
 
 try:
     startup_script_path = os.path.join(user_home, "startup.sh")
-    os.system(f'sudo touch {startup_script_path}')
+    os.system(f'touch {startup_script_path}')
     with open(startup_script_path, 'w') as file_to_write:
         # you can choose how to control the robot
         if use_uv:
             # Use the virtual environment in the startup script
             file_to_write.write(
-                f"#!/bin/sh\nsource {venv_path}/bin/activate && python3 " + thisPath + "/server/webServer.py")
+                f"#!/bin/bash\nsource {venv_path}/bin/activate\npython3 " + thisPath + "/server/webServer.py\n")
         else:
-            file_to_write.write("#!/bin/sh\npython3 " + thisPath + "/server/webServer.py")
-#       file_to_write.write("#!/bin/sh\npython3 " + thisPath + "/server/server.py")
-except:
+            file_to_write.write("#!/bin/bash\npython3 " + thisPath + "/server/webServer.py\n")
+    #       file_to_write.write("#!/bin/bash\npython3 " + thisPath + "/server/server.py\n")
+
+    # Make startup script executable
+    os.system(f'chmod +x {startup_script_path}')
+
+    # Try systemd service first, fallback to cron
+    if not create_systemd_service(startup_script_path):
+        print("Systemd service creation failed, trying crontab...")
+        create_cron_alternative(startup_script_path)
+
+except Exception as e:
+    print(f"Error creating startup configuration: {e}")
     pass
-
-startup_script_path = os.path.join(user_home, "startup.sh")
-os.system(f'sudo chmod 777 {startup_script_path}')
-
-replace_num('/etc/rc.local', 'fi', f'fi\n{startup_script_path} start')
 
 # try:
 #     os.system(f"sudo cp -f {user_home}/adeept_adr029/server/config.txt //etc/config.txt")
