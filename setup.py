@@ -6,6 +6,8 @@
 import os
 import time
 import getpass
+import signal
+import sys
 
 curpath = os.path.realpath(__file__)
 thisPath = "/" + os.path.dirname(curpath)
@@ -15,10 +17,35 @@ current_user = getpass.getuser()
 user_home = os.path.expanduser("~")
 
 
+def signal_handler(sig, frame):
+    """Handle Ctrl+C gracefully"""
+    print("\n\nInstallation interrupted by user (Ctrl+C)")
+    print("Cleaning up...")
+    # Add any cleanup code here if needed
+    sys.exit(1)
+
+
+# Set up signal handler for Ctrl+C
+signal.signal(signal.SIGINT, signal_handler)
+
+
+def run_command_with_interrupt_check(command):
+    """Run a command but allow interruption"""
+    print(f"Running: {command}")
+    try:
+        result = os.system(command)
+        if result != 0:
+            return False
+        return True
+    except KeyboardInterrupt:
+        print(f"\nCommand interrupted: {command}")
+        raise
+
+
 def install_uv():
     """Install uv package manager if not already installed"""
     print("Installing uv package manager...")
-    if os.system("curl -LsSf https://astral.sh/uv/install.sh | sh") != 0:
+    if not run_command_with_interrupt_check("curl -LsSf https://astral.sh/uv/install.sh | sh"):
         print("Error installing uv. Falling back to pip.")
         return False
 
@@ -96,24 +123,28 @@ def create_cron_alternative(startup_script_path):
 
 # Install uv first
 use_uv = False
-if not check_uv_available():
-    use_uv = install_uv()
-else:
-    use_uv = True
+try:
+    if not check_uv_available():
+        use_uv = install_uv()
+    else:
+        use_uv = True
 
-# Create virtual environment with uv if available
-if use_uv:
-    print("Creating virtual environment with uv...")
-    venv_path = os.path.join(user_home, ".venv")
-    os.system(f"uv venv {venv_path}")
-    # Set environment variables to use the virtual environment
-    os.environ["VIRTUAL_ENV"] = venv_path
-    os.environ["PATH"] = f"{venv_path}/bin:{os.environ['PATH']}"
-    pip_cmd = "uv pip install"
-    print(f"Using virtual environment at {venv_path}")
-else:
-    pip_cmd = "pip3 install --user"
-    print("Using pip with --user flag as fallback")
+    # Create virtual environment with uv if available
+    if use_uv:
+        print("Creating virtual environment with uv...")
+        venv_path = os.path.join(user_home, ".venv")
+        run_command_with_interrupt_check(f"uv venv {venv_path}")
+        # Set environment variables to use the virtual environment
+        os.environ["VIRTUAL_ENV"] = venv_path
+        os.environ["PATH"] = f"{venv_path}/bin:{os.environ['PATH']}"
+        pip_cmd = "uv pip install"
+        print(f"Using virtual environment at {venv_path}")
+    else:
+        pip_cmd = "pip3 install --user"
+        print("Using pip with --user flag as fallback")
+except KeyboardInterrupt:
+    print("\nSetup interrupted during uv installation")
+    sys.exit(1)
 
 commands_1 = [
     "sudo apt-get update",
@@ -139,12 +170,17 @@ commands_1 = [
 
 mark_1 = 0
 for x in range(3):
-    for command in commands_1:
-        if os.system(command) != 0:
-            print("Error running installation step 1")
-            mark_1 = 1
-    if mark_1 == 0:
-        break
+    try:
+        for command in commands_1:
+            if not run_command_with_interrupt_check(command):
+                print("Error running installation step 1")
+                mark_1 = 1
+                break
+        if mark_1 == 0:
+            break
+    except KeyboardInterrupt:
+        print("\nInstallation step 1 interrupted")
+        sys.exit(1)
 
 commands_2 = [
     f"{pip_cmd} RPi.GPIO",
@@ -157,12 +193,17 @@ commands_2 = [
 
 mark_2 = 0
 for x in range(3):
-    for command in commands_2:
-        if os.system(command) != 0:
-            print("Error running installation step 2")
-            mark_2 = 1
-    if mark_2 == 0:
-        break
+    try:
+        for command in commands_2:
+            if not run_command_with_interrupt_check(command):
+                print("Error running installation step 2")
+                mark_2 = 1
+                break
+        if mark_2 == 0:
+            break
+    except KeyboardInterrupt:
+        print("\nInstallation step 2 interrupted")
+        sys.exit(1)
 
 
 def replace_num(file, initial, new_num):
