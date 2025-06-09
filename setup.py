@@ -15,6 +15,7 @@ this_path = os.path.dirname(cur_path)
 # Get current user dynamically
 current_user = getpass.getuser()
 user_home = os.path.expanduser("~")
+venv_path = os.path.join(user_home, ".venv")
 
 
 def signal_handler(sig, frame):
@@ -49,13 +50,20 @@ def install_uv():
         print("Error installing uv. Falling back to pip.")
         return False
 
-    # Add uv to PATH for this session
-    uv_path = os.path.join(user_home, ".cargo/bin")
+    # Add uv to PATH for this session - uv installs to ~/.local/bin
+    uv_path = os.path.join(user_home, ".local/bin")
     current_path = os.environ.get("PATH", "")
     if uv_path not in current_path:
         os.environ["PATH"] = f"{uv_path}:{current_path}"
+        print(f"Added {uv_path} to PATH")
 
-    return True
+    # Verify uv is now available
+    if check_uv_available():
+        print("uv successfully installed and available")
+        return True
+    else:
+        print("uv installation failed - not found in PATH")
+        return False
 
 
 def check_uv_available():
@@ -63,10 +71,98 @@ def check_uv_available():
     return os.system("which uv > /dev/null 2>&1") == 0
 
 
+def test_package_installation():
+    """Test if critical packages can be imported"""
+    print("\n=== Testing Package Installation ===")
+    test_packages = [
+        "adafruit_motor",
+        "flask",
+        "RPi.GPIO"
+    ]
+
+    all_good = True
+    for package in test_packages:
+        try:
+            if use_uv:
+                # Test in virtual environment
+                test_cmd = f"source {venv_path}/bin/activate && python3 -c 'import {package}; print(\"✓ {package} imported successfully\")'"
+                if run_command_with_interrupt_check(test_cmd):
+                    continue
+                else:
+                    print(f"✗ {package} import failed")
+                    all_good = False
+            else:
+                # Test with current python
+                result = os.system(f"python3 -c 'import {package}' > /dev/null 2>&1")
+                if result == 0:
+                    print(f"✓ {package} imported successfully")
+                else:
+                    print(f"✗ {package} import failed")
+                    all_good = False
+        except:
+            print(f"✗ {package} test failed")
+            all_good = False
+
+    return all_good
+
+
+def fix_installation_if_needed():
+    """Fix common installation issues"""
+    print("\n=== Checking and Fixing Installation ===")
+
+    # Check if virtual environment exists when using uv
+    if use_uv and not os.path.exists(venv_path):
+        print("Virtual environment missing, recreating...")
+        if run_command_with_interrupt_check(f"uv venv {venv_path}"):
+            print("Virtual environment recreated successfully")
+        else:
+            print("Failed to recreate virtual environment")
+            return False
+
+    # Test package installation
+    if not test_package_installation():
+        print("\nSome packages failed to import. Attempting to reinstall...")
+
+        # Reinstall critical packages
+        critical_packages = [
+            "adafruit-circuitpython-motor",
+            "adafruit-circuitpython-pca9685",
+            "flask",
+            "flask_cors",
+            "websockets",
+            "RPi.GPIO",
+            "rpi_ws281x",
+            "mpu6050-raspberrypi",
+            "luma.oled"
+        ]
+
+        for package in critical_packages:
+            if use_uv:
+                run_command_with_interrupt_check(f"uv pip install {package}")
+            else:
+                run_command_with_interrupt_check(f"pip3 install --user {package}")
+
+        # Test again
+        if test_package_installation():
+            print("✓ Package installation fixed!")
+            return True
+        else:
+            print("✗ Package installation still has issues")
+            return False
+    else:
+        print("✓ All packages imported successfully")
+        return True
+
+
 def create_systemd_service(startup_script_path):
     """Create a systemd service for auto-starting the robot server"""
     service_name = "robot-server.service"
     service_path = f"/etc/systemd/system/{service_name}"
+
+    # Include proper PATH for uv and virtual environment
+    env_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    if use_uv:
+        env_path = f"{user_home}/.local/bin:{env_path}"
 
     service_content = f"""[Unit]
 Description=Robot Server
@@ -81,7 +177,7 @@ WorkingDirectory={this_path}
 ExecStart={startup_script_path}
 Restart=always
 RestartSec=5
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH={env_path}
 
 [Install]
 WantedBy=multi-user.target
@@ -133,8 +229,9 @@ try:
     # Create virtual environment with uv if available
     if use_uv:
         print("Creating virtual environment with uv...")
-        venv_path = os.path.join(user_home, ".venv")
-        run_command_with_interrupt_check(f"uv venv {venv_path}")
+        if not os.path.exists(venv_path):
+            run_command_with_interrupt_check(f"uv venv {venv_path}")
+
         # Set environment variables to use the virtual environment
         os.environ["VIRTUAL_ENV"] = venv_path
         os.environ["PATH"] = f"{venv_path}/bin:{os.environ['PATH']}"
@@ -211,13 +308,27 @@ def replace_num(file, initial, new_num):
     newline = ""
     str_num = str(new_num)
     try:
+        # Read the file
         with open(file, "r") as f:
             for line in f.readlines():
                 if (line.find(initial) == 0):
                     line = (str_num + '\n')
                 newline += line
-        with open(file, "w") as f:
+
+        # Write to temp file first, then move with sudo
+        temp_file = f"/tmp/config_temp_{os.getpid()}.txt"
+        with open(temp_file, "w") as f:
             f.writelines(newline)
+
+        # Move with sudo
+        result = os.system(f"sudo cp {temp_file} {file}")
+        os.system(f"rm {temp_file}")  # Clean up temp file
+
+        if result != 0:
+            print(f"Error: Failed to update {file} with sudo")
+        else:
+            print(f"Successfully updated {file}")
+
     except FileNotFoundError:
         print(f"Warning: {file} not found, skipping configuration")
     except Exception as e:
@@ -238,7 +349,10 @@ def update_boot_config():
             # If it contains the redirect warning, use new location
             if "DO NOT EDIT" in content.upper() or "moved to" in content:
                 print("Old config is a redirect, using new location")
-                replace_num(new_config, '#dtparam=i2c_arm=on', 'dtparam=i2c_arm=on\nstart_x=1\n')
+                if os.path.exists(new_config):
+                    replace_num(new_config, '#dtparam=i2c_arm=on', 'dtparam=i2c_arm=on\nstart_x=1\n')
+                else:
+                    print(f"Warning: {new_config} not found")
             else:
                 # Old config is the real one, use it
                 print("Using old config location")
@@ -246,9 +360,12 @@ def update_boot_config():
         else:
             # Old config doesn't exist, must be new system
             print("Old config not found, using new location")
-            replace_num(new_config, '#dtparam=i2c_arm=on', 'dtparam=i2c_arm=on\nstart_x=1\n')
+            if os.path.exists(new_config):
+                replace_num(new_config, '#dtparam=i2c_arm=on', 'dtparam=i2c_arm=on\nstart_x=1\n')
+            else:
+                print(f"Warning: {new_config} not found")
 
-        print('Updated boot config to enable i2c and camera')
+        print('Boot config update completed')
 
     except Exception as e:
         print(f'Error updating boot config: {e}')
@@ -259,36 +376,52 @@ try:
 except:
     print('Error updating boot config to enable i2c. Please try again.')
 
-# And fix the startup script creation:
+# Run installation verification and fix
 try:
-    startup_script_path = os.path.join(user_home, "startup.sh")  # This should create it in /home/aleks/
+    if not fix_installation_if_needed():
+        print("\n⚠️  Warning: Some packages may not be properly installed")
+        print("You may need to manually install missing packages after reboot")
+except Exception as e:
+    print(f"Error during installation verification: {e}")
+
+# Create startup script
+try:
+    startup_script_path = os.path.join(user_home, "startup.sh")
     with open(startup_script_path, 'w') as file_to_write:
         if use_uv:
             # Use the virtual environment in the startup script
-            file_to_write.write(
-                f"#!/bin/bash\nsource {venv_path}/bin/activate\npython3 {this_path}/server/webServer.py\n"
-            )
+            file_to_write.write(f"#!/bin/bash\n")
+            file_to_write.write(f"export PATH={user_home}/.local/bin:$PATH\n")
+            file_to_write.write(f"source {venv_path}/bin/activate\n")
+            file_to_write.write(f"python3 {this_path}/server/webServer.py\n")
         else:
-            file_to_write.write(f"#!/bin/bash\npython3 {thisPath}/server/webServer.py\n")
-    #       file_to_write.write("#!/bin/bash\npython3 " + thisPath + "/server/server.py\n")
+            file_to_write.write(f"#!/bin/bash\n")
+            file_to_write.write(f"export PATH={user_home}/.local/bin:$PATH\n")
+            file_to_write.write(f"python3 {this_path}/server/webServer.py\n")
 
     # Make startup script executable
     os.system(f'chmod +x {startup_script_path}')
 
     # Try systemd service first, fallback to cron
+    print(f"Startup script created at: {startup_script_path}")
+    print(f"Virtual environment: {venv_path if use_uv else 'Not using virtual environment'}")
+
     if not create_systemd_service(startup_script_path):
         print("Systemd service creation failed, trying crontab...")
         create_cron_alternative(startup_script_path)
 
 except Exception as e:
     print(f"Error creating startup configuration: {e}")
-    pass
 
-# try:
-#     os.system(f"sudo cp -f {user_home}/adeept_adr029/server/config.txt //etc/config.txt")
-# except:
-#     os.system("sudo cp -f "+ thisPath  +"/adeept_rasptank/server/config.txt //etc/config.txt")
+print('\n=== Installation Summary ===')
+print(f'Package manager: {"uv with virtual environment" if use_uv else "pip3 with --user"}')
+print(f'Startup script: {startup_script_path}')
+print(f'Service: robot-server.service')
+print('\nThe program in Raspberry Pi has been installed, disconnected and restarted.')
+print('You can now power off the Raspberry Pi to install the camera and driver board (Robot HAT).')
 print(
-    'The program in Raspberry Pi has been installed, disconnected and restarted. \nYou can now power off the Raspberry Pi to install the camera and driver board (Robot HAT). \nAfter turning on again, the Raspberry Pi will automatically run the program to set the servos port signal to turn the servos to the middle position, which is convenient for mechanical assembly.')
+    'After turning on again, the Raspberry Pi will automatically run the program to set the servos port signal to turn the servos to the middle position, which is convenient for mechanical assembly.')
+print('\nTo check status after reboot: sudo systemctl status robot-server')
+print('To view logs: sudo journalctl -u robot-server -f')
 print('restarting...')
 os.system("sudo reboot")
