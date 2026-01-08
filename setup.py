@@ -4,7 +4,6 @@
 # Date        : 2022/7/12
 
 import os
-import time
 import getpass
 import signal
 import sys
@@ -41,29 +40,6 @@ def run_command_with_interrupt_check(command):
     except KeyboardInterrupt:
         print(f"\nCommand interrupted: {command}")
         raise
-
-
-def install_uv():
-    """Install uv package manager if not already installed"""
-    print("Installing uv package manager...")
-    if not run_command_with_interrupt_check("curl -LsSf https://astral.sh/uv/install.sh | sh"):
-        print("Error installing uv. Falling back to pip.")
-        return False
-
-    # Add uv to PATH for this session - uv installs to ~/.local/bin
-    uv_path = os.path.join(user_home, ".local/bin")
-    current_path = os.environ.get("PATH", "")
-    if uv_path not in current_path:
-        os.environ["PATH"] = f"{uv_path}:{current_path}"
-        print(f"Added {uv_path} to PATH")
-
-    # Verify uv is now available
-    if check_uv_available():
-        print("uv successfully installed and available")
-        return True
-    else:
-        print("uv installation failed - not found in PATH")
-        return False
 
 
 def check_uv_available():
@@ -130,6 +106,7 @@ def fix_installation_if_needed():
             "flask",
             "flask_cors",
             "websockets",
+            "psutil",
             "RPi.GPIO",
             "rpi_ws281x",
             "mpu6050-raspberrypi",
@@ -155,7 +132,9 @@ def fix_installation_if_needed():
 
 
 def create_systemd_service(startup_script_path):
-    """Create a systemd service for auto-starting the robot server"""
+    """
+    Create a systemd service for auto-starting the robot server
+    """
     service_name = "robot-server.service"
     service_path = f"/etc/systemd/system/{service_name}"
 
@@ -218,31 +197,18 @@ def create_cron_alternative(startup_script_path):
         return False
 
 
-# Install uv first
-use_uv = False
-try:
-    if not check_uv_available():
-        use_uv = install_uv()
-    else:
-        use_uv = True
 
-    # Create virtual environment with uv if available
-    if use_uv:
-        print("Creating virtual environment with uv...")
-        if not os.path.exists(venv_path):
-            run_command_with_interrupt_check(f"uv venv {venv_path}")
+use_uv = True  # hardcoded - we are using the uv base image, should be there!
+# Create virtual environment with uv if available
+print("Creating virtual environment with uv...")
+if not os.path.exists(venv_path):
+    run_command_with_interrupt_check(f"uv venv {venv_path}")
 
-        # Set environment variables to use the virtual environment
-        os.environ["VIRTUAL_ENV"] = venv_path
-        os.environ["PATH"] = f"{venv_path}/bin:{os.environ['PATH']}"
-        pip_cmd = "uv pip install"
-        print(f"Using virtual environment at {venv_path}")
-    else:
-        pip_cmd = "pip3 install --user"
-        print("Using pip with --user flag as fallback")
-except KeyboardInterrupt:
-    print("\nSetup interrupted during uv installation")
-    sys.exit(1)
+# Set environment variables to use the virtual environment
+os.environ["VIRTUAL_ENV"] = venv_path
+os.environ["PATH"] = f"{venv_path}/bin:{os.environ['PATH']}"
+pip_cmd = "uv pip install"
+print(f"Using virtual environment at {venv_path}")
 
 commands_1 = [
     "sudo apt-get update",
@@ -259,6 +225,8 @@ commands_1 = [
     f"{pip_cmd} flask",
     f"{pip_cmd} flask_cors",
     f"{pip_cmd} websockets",
+    f"{pip_cmd} psutil",
+    f"{pip_cmd} smbus",
     "sudo apt-get install -y libjasper-dev",
     "sudo apt-get install -y libatlas-base-dev",
     "sudo apt-get install -y libgstreamer1.0-0",

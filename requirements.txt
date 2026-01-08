@@ -1,0 +1,26 @@
+# Core Raspberry Pi GPIO libraries
+RPi.GPIO
+
+# Adafruit CircuitPython libraries for motor and servo control
+adafruit-circuitpython-motor
+adafruit-circuitpython-pca9685
+
+# Web server and API libraries
+flask
+flask-cors
+websockets
+
+# System monitoring and utilities
+psutil
+
+# Hardware communication libraries
+smbus
+
+# OLED display library
+luma.oled
+
+# LED strip control
+rpi-ws281x
+
+# MPU6050 sensor library
+mpu6050-raspberrypi
